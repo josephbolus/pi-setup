@@ -1,9 +1,11 @@
-import { homedir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { homedir, userInfo } from "node:os";
 import { relative } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
   ReadonlyFooterDataProvider,
+  Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
   getCapabilities,
@@ -20,8 +22,15 @@ import {
   isGitInfoState,
   isModelInfoState,
 } from "../shared/dashboard-state.ts";
+import {
+  Glow,
+  cellsToLines,
+  orbHeightForWidth,
+  paintOrb,
+  paletteForIndex,
+  type GlyphSet,
+} from "./src/orb.ts";
 
-type Rgb = [number, number, number];
 interface RenderableNode {
   children?: RenderableNode[];
   invalidate(): void;
@@ -32,24 +41,38 @@ interface DashboardTui extends RenderableNode {
   requestRender(force?: boolean): void;
 }
 
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const PALETTE: Rgb[] = [
-  [22, 83, 189],
-  [48, 129, 247],
-  [93, 171, 255],
-  [151, 205, 255],
-  [93, 171, 255],
-  [48, 129, 247],
-];
-const TITLE_LINES = [
-  "  ██████╗  ██╗ ",
-  "  ██╔══██╗ ██║ ",
-  "  ██████╔╝ ██║ ",
-  "  ██╔═══╝  ██║ ",
-  "  ██║      ██║ ",
-  "  ╚═╝      ╚═╝ ",
-];
+// Orb header. ORB_PALETTE 1–8 picks color and motion speed.
+// ORB_CELL_ASPECT is cellWidth/cellHeight. Lower = wider orb, higher = taller.
+const ORB_WIDTH = 30;
+const ORB_CELL_ASPECT = 0.42;
+const ORB_HEIGHT = orbHeightForWidth(ORB_WIDTH, ORB_CELL_ASPECT);
+const ORB_GLYPHS: GlyphSet = "dotField";
+const ORB_PALETTE = 6; // indigo → blue
+const ORB_FPS = 12;
+const ORB_SEED = 42;
+const ORB_SIZE_SCALE = 1;
+const ORB_TEXT_GAP = 4;
+const ORB_LEFT_PAD = 15;
+
+function firstNameFromPasswd() {
+  const user = process.env.USER ?? userInfo().username;
+  try {
+    const gecos =
+      execFileSync("getent", ["passwd", user], {
+        encoding: "utf8",
+        timeout: 1000,
+      })
+        .trim()
+        .split(":")[4] ?? "";
+    const name = gecos.split(",")[0]?.trim().split(/\s+/)[0];
+    if (name) return name;
+  } catch {
+    // /etc/passwd GECOS isn't always present
+  }
+  return user;
+}
+
+const HUMAN = firstNameFromPasswd();
 const ANSI_PATTERN =
   /[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[a-zA-Z\d]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g;
 // eslint-disable-next-line no-control-regex
@@ -66,43 +89,6 @@ function sanitizeTerminalLabel(text: string) {
     .replace(CSI_PATTERN, "")
     .replace(ESCAPE_PATTERN, "")
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
-}
-
-function mix(a: number, b: number, amount: number) {
-  return Math.round(a + (b - a) * amount);
-}
-
-function sampleGradient(position: number) {
-  const wrapped = ((position % 1) + 1) % 1;
-  const scaled = wrapped * PALETTE.length;
-  const index = Math.floor(scaled);
-  const nextIndex = (index + 1) % PALETTE.length;
-  const amount = scaled - index;
-  const start = PALETTE[index]!;
-  const end = PALETTE[nextIndex]!;
-
-  return [
-    mix(start[0], end[0], amount),
-    mix(start[1], end[1], amount),
-    mix(start[2], end[2], amount),
-  ] satisfies Rgb;
-}
-
-function foreground([red, green, blue]: Rgb, text: string) {
-  return `\x1b[38;2;${red};${green};${blue}m${text}${RESET}`;
-}
-
-function gradientText(text: string, phase: number) {
-  const characters = [...text];
-  const span = Math.max(characters.length - 1, 1);
-
-  return characters
-    .map((character, index) =>
-      character === " "
-        ? character
-        : foreground(sampleGradient(index / span + phase), character),
-    )
-    .join("");
 }
 
 function hasChildren(
@@ -159,9 +145,51 @@ function formatDirectory(cwd: string) {
   return sanitizeTerminalLabel(display);
 }
 
-function center(text: string, width: number) {
-  const padding = Math.max(0, Math.floor((width - visibleWidth(text)) / 2));
-  return truncateToWidth(`${" ".repeat(padding)}${text}`, width);
+function padVisible(text: string, width: number) {
+  const visible = visibleWidth(text);
+  if (visible >= width) return truncateToWidth(text, width);
+  return `${text}${" ".repeat(width - visible)}`;
+}
+
+function joinColumns(
+  left: string[],
+  right: string[],
+  width: number,
+  gap = ORB_TEXT_GAP,
+) {
+  const leftWidth = Math.max(
+    ORB_WIDTH,
+    ...left.map((line) => visibleWidth(line)),
+  );
+  const rightWidth = Math.max(1, width - ORB_LEFT_PAD - leftWidth - gap);
+  const height = Math.max(left.length, right.length);
+  const leftOffset = Math.max(0, Math.floor((height - left.length) / 2));
+  const rightOffset = Math.max(0, Math.floor((height - right.length) / 2));
+  const lines: string[] = [];
+  for (let row = 0; row < height; row++) {
+    const leftLine = left[row - leftOffset] ?? "";
+    const rightLine = right[row - rightOffset] ?? "";
+    lines.push(
+      truncateToWidth(
+        `${" ".repeat(ORB_LEFT_PAD)}${padVisible(leftLine, leftWidth)}${" ".repeat(gap)}${truncateToWidth(rightLine, rightWidth)}`,
+        width,
+      ),
+    );
+  }
+  return lines;
+}
+
+function welcomeCopy(theme: Theme) {
+  return [
+    theme.bold(theme.fg("text", `Welcome to Pi ${HUMAN}`)),
+    "",
+    theme.fg("muted", "Type / to use slash commands"),
+    theme.fg("muted", "Type @ to mention files"),
+    theme.fg("muted", "Type ! to run a local command"),
+    theme.fg("muted", "Ctrl+C to exit"),
+    "",
+    `${theme.fg("accent", "/help")}${theme.fg("muted", " for more")}`,
+  ];
 }
 
 function columns(left: string, right: string, width: number) {
@@ -220,23 +248,48 @@ export default function uiCustomization(pi: ExtensionAPI) {
   function install(ctx: ExtensionContext) {
     if (ctx.mode !== "tui") return;
 
-    ctx.ui.setHeader((tui) => {
+    ctx.ui.setHeader((tui, theme) => {
       activeTui = tui;
       requestRender = () => tui.requestRender();
       scheduleThemeRemoval(tui);
 
+      const glow = new Glow(ORB_SEED);
+      const palette = paletteForIndex(ORB_PALETTE);
+      const started = Date.now();
+      const welcome = welcomeCopy(theme);
+      const frameMs = 1000 / ORB_FPS;
+      let cached: { frame: number; width: number; lines: string[] } | undefined;
+      const timer = setInterval(() => tui.requestRender(), frameMs);
+      timer.unref();
+
       return {
         render(width: number) {
-          const art = TITLE_LINES.map((line, row) =>
-            center(gradientText(line, row * 0.045), width),
+          const frame = Math.floor((Date.now() - started) / frameMs);
+          if (cached && cached.frame === frame && cached.width === width) {
+            return cached.lines;
+          }
+          const orb = cellsToLines(
+            paintOrb({
+              width: ORB_WIDTH,
+              height: ORB_HEIGHT,
+              time: frame * (1 / ORB_FPS),
+              agentMode: palette.name,
+              glyphSet: ORB_GLYPHS,
+              sizeScale: ORB_SIZE_SCALE,
+              cellAspect: ORB_CELL_ASPECT,
+              glow,
+            }),
           );
-          const subtitle = center(
-            `${BOLD}${gradientText(title, 0.18)}${RESET}`,
-            width,
-          );
-          return ["", ...art, subtitle, ""];
+          const lines = ["", ...joinColumns(orb, welcome, width), ""];
+          cached = { frame, width, lines };
+          return lines;
         },
-        invalidate() {},
+        invalidate() {
+          cached = undefined;
+        },
+        dispose() {
+          clearInterval(timer);
+        },
       };
     });
 

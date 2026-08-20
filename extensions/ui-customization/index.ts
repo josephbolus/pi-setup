@@ -192,7 +192,7 @@ function sessionCard(
   const sidePad = 1;
   const chrome = 2 + sidePad * 2;
 
-  const prompt = `${theme.fg("dim", ">_")} ${theme.bold(theme.fg("text", "Pi"))} ${theme.fg("muted", `(v${VERSION})`)}`;
+  const prompt = `${theme.fg("accent", "π")} ${theme.bold(theme.fg("text", "Pi"))} ${theme.fg("muted", `(v${VERSION})`)}`;
   const modelName =
     !model.modelId || model.modelId === "no-model"
       ? "—"

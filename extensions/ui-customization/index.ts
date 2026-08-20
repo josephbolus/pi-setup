@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { homedir, userInfo } from "node:os";
 import { relative } from "node:path";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  ReadonlyFooterDataProvider,
-  Theme,
+import {
+  VERSION,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type ReadonlyFooterDataProvider,
+  type Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
   getCapabilities,
@@ -21,6 +22,7 @@ import {
   REFRESH_CHANNEL,
   isGitInfoState,
   isModelInfoState,
+  type ModelInfoState,
 } from "../shared/dashboard-state.ts";
 import {
   Glow,
@@ -179,18 +181,76 @@ function joinColumns(
   return lines;
 }
 
-function welcomeCopy(theme: Theme, cwd: string) {
+function sessionCard(
+  theme: Theme,
+  cwd: string,
+  model: ModelInfoState,
+  maxWidth: number,
+) {
+  const labelCol = visibleWidth("directory:");
+  const gap = "  ";
+  const sidePad = 1;
+  const chrome = 2 + sidePad * 2;
+
+  const prompt = `${theme.fg("dim", ">_")} ${theme.bold(theme.fg("text", "Pi"))} ${theme.fg("muted", `(v${VERSION})`)}`;
+  const modelName =
+    !model.modelId || model.modelId === "no-model"
+      ? "—"
+      : model.thinking && model.thinking !== "off"
+        ? `${model.modelId} ${model.thinking}`
+        : model.modelId;
+  const modelLine = `${padVisible(theme.fg("muted", "model:"), labelCol)}${gap}${theme.fg("text", modelName)}  ${theme.fg("accent", "/model to change")}`;
+  const dirLine = `${padVisible(theme.fg("muted", "directory:"), labelCol)}${gap}${theme.fg("text", formatDirectory(cwd))}`;
+
+  const contentWidth = Math.max(
+    visibleWidth(prompt),
+    visibleWidth(modelLine),
+    visibleWidth(dirLine),
+  );
+  const inner = Math.max(
+    20,
+    Math.min(contentWidth, Math.max(8, maxWidth - chrome)),
+  );
+
+  const paint = (line: string) =>
+    theme.bg(
+      "userMessageBg",
+      `${theme.fg("border", "│")}${" ".repeat(sidePad)}${padVisible(truncateToWidth(line, inner), inner)}${" ".repeat(sidePad)}${theme.fg("border", "│")}`,
+    );
+  const bar = (left: string, right: string) =>
+    theme.bg(
+      "userMessageBg",
+      theme.fg("border", `${left}${"─".repeat(inner + sidePad * 2)}${right}`),
+    );
+
   return [
-    theme.bold(theme.fg("text", `Welcome to Pi ${HUMAN}`)),
+    bar("╭", "╮"),
+    paint(prompt),
+    bar("├", "┤"),
+    paint(modelLine),
+    paint(dirLine),
+    bar("╰", "╯"),
+  ];
+}
+
+function welcomeCopy(
+  theme: Theme,
+  cwd: string,
+  model: ModelInfoState,
+  rightWidth: number,
+) {
+  return [
+    theme.bold(theme.fg("text", `Welcome to Pi ${HUMAN}!`)),
     "",
+    theme.fg("accent", "Tips for getting started"),
     theme.fg("muted", "Type / to use slash commands"),
     theme.fg("muted", "Type @ to mention files"),
     theme.fg("muted", "Type ! to run a local command"),
     theme.fg("muted", "Ctrl+C to exit"),
     "",
-    `${theme.fg("accent", "/help")}${theme.fg("muted", " for more")}`,
-    "",
-    theme.fg("text", formatDirectory(cwd)),
+    // Hidden for now — restore to put /help back under the tips:
+    // `${theme.fg("accent", "/help")}${theme.fg("muted", " for more")}`,
+    ...sessionCard(theme, cwd, model, rightWidth),
   ];
 }
 
@@ -258,16 +318,29 @@ export default function uiCustomization(pi: ExtensionAPI) {
       const glow = new Glow(ORB_SEED);
       const palette = paletteForIndex(ORB_PALETTE);
       const started = Date.now();
-      const welcome = welcomeCopy(theme, ctx.cwd);
       const frameMs = 1000 / ORB_FPS;
-      let cached: { frame: number; width: number; lines: string[] } | undefined;
+      let cached:
+        | {
+            frame: number;
+            width: number;
+            modelId: string;
+            thinking: string;
+            lines: string[];
+          }
+        | undefined;
       const timer = setInterval(() => tui.requestRender(), frameMs);
       timer.unref();
 
       return {
         render(width: number) {
           const frame = Math.floor((Date.now() - started) / frameMs);
-          if (cached && cached.frame === frame && cached.width === width) {
+          if (
+            cached &&
+            cached.frame === frame &&
+            cached.width === width &&
+            cached.modelId === modelInfo.modelId &&
+            cached.thinking === modelInfo.thinking
+          ) {
             return cached.lines;
           }
           const orb = cellsToLines(
@@ -282,8 +355,28 @@ export default function uiCustomization(pi: ExtensionAPI) {
               glow,
             }),
           );
+          const leftWidth = Math.max(
+            ORB_WIDTH,
+            ...orb.map((line) => visibleWidth(line)),
+          );
+          const rightWidth = Math.max(
+            1,
+            width - ORB_LEFT_PAD - leftWidth - ORB_TEXT_GAP,
+          );
+          const welcome = welcomeCopy(
+            theme,
+            ctx.cwd,
+            modelInfo,
+            rightWidth,
+          );
           const lines = ["", ...joinColumns(orb, welcome, width), ""];
-          cached = { frame, width, lines };
+          cached = {
+            frame,
+            width,
+            modelId: modelInfo.modelId,
+            thinking: modelInfo.thinking,
+            lines,
+          };
           return lines;
         },
         invalidate() {

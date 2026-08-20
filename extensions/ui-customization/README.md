@@ -19,6 +19,7 @@ const ORB_SEED = 42;
 const ORB_SIZE_SCALE = 1;
 const ORB_TEXT_GAP = 4;
 const ORB_LEFT_PAD = 15;
+const TIP_MS = 4000;
 ```
 
 | Constant | Default | What it does |
@@ -33,6 +34,7 @@ const ORB_LEFT_PAD = 15;
 | `ORB_SIZE_SCALE` | `1` | Fill fraction of the box; capped at `1` so the sphere is not clipped |
 | `ORB_TEXT_GAP` | `4` | Spaces between the orb and the welcome copy |
 | `ORB_LEFT_PAD` | `15` | Spaces to the left of the orb |
+| `TIP_MS` | `4000` | How long each getting-started tip stays on screen |
 
 ### Proportions
 
@@ -76,7 +78,7 @@ There are no runtime keybindings. Edit the constants and `/reload`.
 
 ## Welcome line
 
-The header shows `Welcome to Pi $HUMAN!` next to the orb, an accent `Tips for getting started` heading, the slash-command hints, and a session card (`π Pi (vVERSION)`, model, directory). `/help for more` is commented out in `welcomeCopy` for now. `$HUMAN` is the first word of the GECOS name from:
+The header shows `Welcome to Pi $HUMAN!` next to the orb, an accent `Tips for getting started` heading, **one** muted tip (cycles every `TIP_MS` through the 20-entry `TIPS` list), and an outline-only session card (`π Pi (vVERSION)`, model, directory — no fill). `/help for more` is commented out in `welcomeCopy` for now. `$HUMAN` is the first word of the GECOS name from:
 
 ```bash
 getent passwd "$USER" | cut -d: -f5 | cut -d, -f1 | awk '{print $1}'

@@ -55,6 +55,29 @@ const ORB_SEED = 42;
 const ORB_SIZE_SCALE = 1;
 const ORB_TEXT_GAP = 4;
 const ORB_LEFT_PAD = 15;
+const TIP_MS = 4000;
+const TIPS = [
+  "Type / to use slash commands",
+  "Type @ to mention files",
+  "Type ! to run a local command",
+  "Ctrl+C twice to quit",
+  "Tab to complete file paths",
+  "Shift+Enter for a multi-line prompt",
+  "/model or Ctrl+L to switch models",
+  "Shift+Tab to cycle thinking level",
+  "Escape twice to open the session tree",
+  "/reload after changing extensions or skills",
+  "/help for the full command list",
+  "/hotkeys for keyboard shortcuts",
+  "Ctrl+V to paste an image or text",
+  "Ctrl+G to open the prompt in your editor",
+  "Escape to cancel the current turn",
+  "/resume to pick a previous session",
+  "/new to start a fresh session",
+  "/compact when context gets large",
+  "Ctrl+X to copy the last reply",
+  "Enter queues a message while Pi is working",
+];
 
 function firstNameFromPasswd() {
   const user = process.env.USER ?? userInfo().username;
@@ -213,15 +236,9 @@ function sessionCard(
   );
 
   const paint = (line: string) =>
-    theme.bg(
-      "userMessageBg",
-      `${theme.fg("border", "│")}${" ".repeat(sidePad)}${padVisible(truncateToWidth(line, inner), inner)}${" ".repeat(sidePad)}${theme.fg("border", "│")}`,
-    );
+    `${theme.fg("border", "│")}${" ".repeat(sidePad)}${padVisible(truncateToWidth(line, inner), inner)}${" ".repeat(sidePad)}${theme.fg("border", "│")}`;
   const bar = (left: string, right: string) =>
-    theme.bg(
-      "userMessageBg",
-      theme.fg("border", `${left}${"─".repeat(inner + sidePad * 2)}${right}`),
-    );
+    theme.fg("border", `${left}${"─".repeat(inner + sidePad * 2)}${right}`);
 
   return [
     bar("╭", "╮"),
@@ -238,15 +255,13 @@ function welcomeCopy(
   cwd: string,
   model: ModelInfoState,
   rightWidth: number,
+  tipIndex: number,
 ) {
   return [
     theme.bold(theme.fg("text", `Welcome to Pi ${HUMAN}!`)),
     "",
     theme.fg("accent", "Tips for getting started"),
-    theme.fg("muted", "Type / to use slash commands"),
-    theme.fg("muted", "Type @ to mention files"),
-    theme.fg("muted", "Type ! to run a local command"),
-    theme.fg("muted", "Ctrl+C to exit"),
+    theme.fg("muted", TIPS[tipIndex] ?? TIPS[0]!),
     "",
     // Hidden for now — restore to put /help back under the tips:
     // `${theme.fg("accent", "/help")}${theme.fg("muted", " for more")}`,
@@ -325,6 +340,7 @@ export default function uiCustomization(pi: ExtensionAPI) {
             width: number;
             modelId: string;
             thinking: string;
+            tipIndex: number;
             lines: string[];
           }
         | undefined;
@@ -333,13 +349,17 @@ export default function uiCustomization(pi: ExtensionAPI) {
 
       return {
         render(width: number) {
-          const frame = Math.floor((Date.now() - started) / frameMs);
+          const now = Date.now();
+          const frame = Math.floor((now - started) / frameMs);
+          const tipIndex =
+            Math.floor((now - started) / TIP_MS) % TIPS.length;
           if (
             cached &&
             cached.frame === frame &&
             cached.width === width &&
             cached.modelId === modelInfo.modelId &&
-            cached.thinking === modelInfo.thinking
+            cached.thinking === modelInfo.thinking &&
+            cached.tipIndex === tipIndex
           ) {
             return cached.lines;
           }
@@ -368,6 +388,7 @@ export default function uiCustomization(pi: ExtensionAPI) {
             ctx.cwd,
             modelInfo,
             rightWidth,
+            tipIndex,
           );
           const lines = ["", ...joinColumns(orb, welcome, width), ""];
           cached = {
@@ -375,6 +396,7 @@ export default function uiCustomization(pi: ExtensionAPI) {
             width,
             modelId: modelInfo.modelId,
             thinking: modelInfo.thinking,
+            tipIndex,
             lines,
           };
           return lines;

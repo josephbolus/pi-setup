@@ -76,7 +76,7 @@ There are no runtime keybindings. Edit the constants and `/reload`.
 
 ## Welcome line
 
-The header shows `Welcome to Pi $HUMAN` next to the orb. `$HUMAN` is the first word of the GECOS name from:
+The header shows `Welcome to Pi $HUMAN` next to the orb, then the slash-command hints, `/help`, and the session cwd (`~/...`, same form as the footer). `$HUMAN` is the first word of the GECOS name from:
 
 ```bash
 getent passwd "$USER" | cut -d: -f5 | cut -d, -f1 | awk '{print $1}'

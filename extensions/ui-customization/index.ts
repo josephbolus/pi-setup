@@ -179,7 +179,7 @@ function joinColumns(
   return lines;
 }
 
-function welcomeCopy(theme: Theme) {
+function welcomeCopy(theme: Theme, cwd: string) {
   return [
     theme.bold(theme.fg("text", `Welcome to Pi ${HUMAN}`)),
     "",
@@ -189,6 +189,8 @@ function welcomeCopy(theme: Theme) {
     theme.fg("muted", "Ctrl+C to exit"),
     "",
     `${theme.fg("accent", "/help")}${theme.fg("muted", " for more")}`,
+    "",
+    theme.fg("text", formatDirectory(cwd)),
   ];
 }
 
@@ -256,7 +258,7 @@ export default function uiCustomization(pi: ExtensionAPI) {
       const glow = new Glow(ORB_SEED);
       const palette = paletteForIndex(ORB_PALETTE);
       const started = Date.now();
-      const welcome = welcomeCopy(theme);
+      const welcome = welcomeCopy(theme, ctx.cwd);
       const frameMs = 1000 / ORB_FPS;
       let cached: { frame: number; width: number; lines: string[] } | undefined;
       const timer = setInterval(() => tui.requestRender(), frameMs);
